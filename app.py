@@ -102,34 +102,27 @@ if 'current_summary' not in st.session_state:
 # Inicializar APIs
 @st.cache_resource
 def load_apis():
-    # Verificar se os segredos do Reddit estão disponíveis
-    reddit_secrets = st.secrets.get("reddit", {})
-    use_reddit_mock = not (
-        reddit_secrets.get("client_id") and
-        reddit_secrets.get("client_secret") and
-        reddit_secrets.get("user_agent")
-    )
-    
-    # Debug info - safely show what secrets we found (redacting sensitive parts)
-    client_id = reddit_secrets.get("client_id", "")
-    client_secret = reddit_secrets.get("client_secret", "")
-    user_agent = reddit_secrets.get("user_agent", "")
-    
-    print(f"REDDIT SECRETS DEBUG:")
-    print(f"- client_id: {client_id[:4] + '****' if client_id else 'None'}")
-    print(f"- client_secret: {client_secret[:4] + '****' if client_secret else 'None'}")
-    print(f"- user_agent: {user_agent[:10] + '...' if len(user_agent) > 10 else user_agent}")
-    print(f"- Using mock data: {use_reddit_mock}")
-    
-    if use_reddit_mock:
-        st.warning("Segredos do Reddit não encontrados. Usando dados simulados para Reddit API.")
-        
-    reddit_api = RedditAPI(use_mock_data=use_reddit_mock)
-    openai_classifier = OpenAIClassifier()  # Already configured to use real API when key is available
-    firecrawl_summarizer = FirecrawlSummarizer()  # Already configured to use real API when key is available
-    return reddit_api, openai_classifier, firecrawl_summarizer
+    print("load_apis - Initializing APIs")
+    try:
+        # Initialize APIs directly - RedditAPI will handle secrets internally or raise an error
+        reddit_api = RedditAPI()
+        openai_classifier = OpenAIClassifier()  # Assumes it handles its own secrets/mock state
+        firecrawl_summarizer = FirecrawlSummarizer() # Assumes it handles its own secrets/mock state
+        print("load_apis - APIs initialized successfully")
+        return reddit_api, openai_classifier, firecrawl_summarizer
+    except Exception as e:
+        st.error(f"Falha crítica ao inicializar APIs: {e}")
+        # Optionally return None or re-raise to stop the app
+        print(f"load_apis - Critical API initialization failed: {e}")
+        return None, None, None # Return None to indicate failure
 
+# Attempt to load APIs
 reddit_api, openai_classifier, firecrawl_summarizer = load_apis()
+
+# Check if APIs loaded successfully before proceeding
+if not reddit_api or not openai_classifier or not firecrawl_summarizer:
+    st.error("Não foi possível carregar os serviços de API. Verifique os logs e as configurações de secrets.")
+    st.stop() # Stop the app execution if APIs failed to load
 
 # Lista de subreddits populares
 POPULAR_SUBREDDITS = [
@@ -461,19 +454,19 @@ def main():
     with st.expander("🔧 Informações de Debug", expanded=False):
         # Mostrar status das APIs
         st.markdown("#### Status das APIs:")
-        st.markdown(f"- **Reddit API:** {'🟠 Modo Simulado Ativo' if reddit_api.use_mock_data else '✅ API Real Ativa'}")
+        st.markdown(f"- **Reddit API:** {'✅ Conectado' if reddit_api else '❌ Falha na Conexão'}")
         st.markdown(f"- **OpenAI Classifier:** {'🟠 Modo Simulado Ativo' if openai_classifier.use_mock else '✅ API Real Ativa'}")
         st.markdown(f"- **Firecrawl Summarizer:** {'🟠 Modo Simulado Ativo' if firecrawl_summarizer.use_mock else '✅ API Real Ativa'}")
         
-        # Mostrar exemplo de busca
-        if st.button("🔍 Testar Busca com 'python'"):
+        # Update test button if needed, or remove if it causes issues
+        if reddit_api and st.button("🔍 Testar Busca com 'python'"):
             st.markdown("#### Teste de Busca:")
             test_results = reddit_api.search_posts("python", limit=1)
             if test_results:
-                st.success(f"✅ Busca funcionando! Encontrado: {test_results[0]['title']}")
+                st.success(f"✅ Busca real funcionando! Encontrado: {test_results[0]['title']}")
                 st.json(test_results[0])
             else:
-                st.error("❌ Erro na busca. Nenhum resultado encontrado.")
+                st.error("❌ Erro na busca real ou nenhum resultado encontrado.")
                 
         # Mostrar informações sobre filtros
         st.markdown("#### Informações sobre Filtros:")

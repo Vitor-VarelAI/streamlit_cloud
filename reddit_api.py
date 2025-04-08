@@ -1,376 +1,131 @@
 """
-Módulo para buscar posts no Reddit usando PRAW ou dados simulados.
+Módulo para buscar posts no Reddit usando PRAW.
 """
 import pandas as pd
-from datetime import datetime, timedelta
-import random
+from datetime import datetime
 import time
-import json
 import os
-import praw  # Importar PRAW
-import streamlit as st  # Importar Streamlit para acessar secrets
+import praw
+import streamlit as st
 
 class RedditAPI:
-    """Classe para interagir com o Reddit ou fornecer dados simulados."""
+    """Classe para interagir com o Reddit via PRAW."""
     
-    def __init__(self, use_mock_data=True):
+    def __init__(self):
         """
-        Inicializa a classe RedditAPI.
-        
-        Args:
-            use_mock_data (bool): Se True, usa dados simulados em vez de API real.
+        Inicializa a classe RedditAPI. Requer credenciais via Streamlit secrets.
+        Levanta exceção se a inicialização do PRAW falhar.
         """
-        print(f"RedditAPI Init - Starting with use_mock_data={use_mock_data}")
-        self.use_mock_data = use_mock_data
+        print("RedditAPI Init - Attempting PRAW initialization")
         self.last_request_time = 0
         self.request_delay = 1  # Delay para API real
-        self.reddit = None  # Inicializar cliente PRAW como None
+        self.reddit = None
         
-        # Criar diretório de dados se não existir
-        os.makedirs(os.path.join(os.path.dirname(__file__), 'data'), exist_ok=True)
-        
-        # Gerar dados simulados se não existirem (para modo mock)
-        self._ensure_mock_data()
-        
-        # Configurar PRAW se não estiver usando dados simulados
-        if not self.use_mock_data:
-            try:
-                # Tentar obter segredos do Streamlit
-                print("RedditAPI - Attempting to get Reddit secrets from Streamlit")
-                reddit_secrets = st.secrets.get("reddit", {})
-                client_id = reddit_secrets.get("client_id")
-                client_secret = reddit_secrets.get("client_secret")
-                user_agent = reddit_secrets.get("user_agent")
+        try:
+            # Obter segredos do Streamlit
+            reddit_secrets = st.secrets.get("reddit", {})
+            client_id = reddit_secrets.get("client_id")
+            client_secret = reddit_secrets.get("client_secret")
+            user_agent = reddit_secrets.get("user_agent")
+            username = reddit_secrets.get("username") # Opcional
+            password = reddit_secrets.get("password") # Opcional
+            
+            print(f"RedditAPI - Found secrets: client_id={'✓' if client_id else '✗'}, client_secret={'✓' if client_secret else '✗'}, user_agent={'✓' if user_agent else '✗'}")
+            
+            if not (client_id and client_secret and user_agent):
+                raise ValueError("Erro: Credenciais essenciais do Reddit (client_id, client_secret, user_agent) não encontradas nos segredos do Streamlit.")
                 
-                # Opcionais para autenticação completa
-                username = reddit_secrets.get("username")
-                password = reddit_secrets.get("password")
+            print("RedditAPI - Initializing PRAW...")
+            praw_config = {
+                'client_id': client_id,
+                'client_secret': client_secret,
+                'user_agent': user_agent,
+            }
+            
+            if username and password and password != "TUA_PASSWORD_AQUI":
+                print("RedditAPI - Using authenticated mode")
+                praw_config['username'] = username
+                praw_config['password'] = password
+            else:
+                print("RedditAPI - Using read-only mode")
+                praw_config['read_only'] = True
                 
-                print(f"RedditAPI - Found secrets: client_id={'✓' if client_id else '✗'}, client_secret={'✓' if client_secret else '✗'}, user_agent={'✓' if user_agent else '✗'}")
-                
-                if client_id and client_secret and user_agent:
-                    print("RedditAPI - Initializing PRAW with secrets")
-                    
-                    # Configurar PRAW com as credenciais disponíveis
-                    praw_config = {
-                        'client_id': client_id,
-                        'client_secret': client_secret,
-                        'user_agent': user_agent,
-                    }
-                    
-                    # Adicionar credenciais de login se disponíveis
-                    if username and password and password != "TUA_PASSWORD_AQUI":
-                        print("RedditAPI - Username and password provided, using authenticated mode")
-                        praw_config['username'] = username
-                        praw_config['password'] = password
-                    else:
-                        print("RedditAPI - Using read-only mode")
-                        praw_config['read_only'] = True
-                    
-                    try:
-                        self.reddit = praw.Reddit(**praw_config)
-                        # Testar se a conexão está funcionando fazendo uma busca simples
-                        test_subreddit = self.reddit.subreddit("all")
-                        next(test_subreddit.new(limit=1), None)  # Testar buscando 1 post
-                        print("Cliente PRAW inicializado com sucesso e testado!")
-                    except Exception as e:
-                        print(f"RedditAPI - Erro ao testar conexão PRAW: {e}")
-                        raise  # Re-lançar exceção para ser capturada pelo try/except externo
-                else:
-                    print("Erro: Credenciais do Reddit não encontradas nos segredos do Streamlit. Voltando para o modo simulado.")
-                    self.use_mock_data = True
-            except Exception as e:
-                print(f"Erro ao inicializar PRAW com Streamlit secrets: {e}. Voltando para o modo simulado.")
-                self.use_mock_data = True
-        
-        print(f"RedditAPI Init - Completed with final use_mock_data={self.use_mock_data}")
-    
+            self.reddit = praw.Reddit(**praw_config)
+            # Testar conexão
+            test_subreddit = self.reddit.subreddit("all")
+            next(test_subreddit.new(limit=1), None)
+            print("Cliente PRAW inicializado e testado com sucesso!")
+            
+        except Exception as e:
+            print(f"FATAL: Erro ao inicializar PRAW com Streamlit secrets: {e}")
+            # Levantar a exceção para impedir a instanciação da classe se PRAW falhar
+            raise ConnectionError(f"Falha ao conectar à API do Reddit: {e}") from e
+            
     def _respect_rate_limit(self):
         """Respeita o rate limit da API."""
         current_time = time.time()
         time_since_last_request = current_time - self.last_request_time
-        
         if time_since_last_request < self.request_delay:
             time.sleep(self.request_delay - time_since_last_request)
-        
         self.last_request_time = time.time()
     
-    def _ensure_mock_data(self):
-        """Garante que os dados simulados existam."""
-        mock_data_path = os.path.join(os.path.dirname(__file__), 'data', 'mock_reddit_data.json')
-        
-        if not os.path.exists(mock_data_path):
-            # Gerar dados simulados
-            mock_data = self._generate_mock_data()
-            
-            # Salvar dados simulados
-            with open(mock_data_path, 'w', encoding='utf-8') as f:
-                json.dump(mock_data, f, indent=2)
-    
-    def _generate_mock_data(self):
+    def search_posts(self, query, subreddit=None, limit=25, sort='new'): # Simplificado sort default
         """
-        Gera dados simulados do Reddit.
-        
-        Returns:
-            dict: Dicionário com dados simulados.
-        """
-        # Tópicos comuns para simular pesquisas
-        topics = [
-            "python", "javascript", "programming", "webdev", "machinelearning",
-            "datascience", "ai", "productivity", "business", "startup",
-            "marketing", "seo", "socialmedia", "design", "ux", "ui",
-            "mobile", "android", "ios", "gaming", "technology", "crypto",
-            "finance", "investing", "personalfinance", "career", "jobs"
-        ]
-        
-        # Subreddits populares
-        subreddits = [
-            "programming", "learnprogramming", "python", "javascript", "webdev",
-            "datascience", "machinelearning", "artificial", "productivity",
-            "technology", "futurology", "startups", "entrepreneur", "business",
-            "marketing", "seo", "socialmedia", "web_design", "userexperience",
-            "androiddev", "iOSProgramming", "gamedev", "cscareerquestions",
-            "personalfinance", "investing", "cryptocurrency", "wallstreetbets"
-        ]
-        
-        # Autores simulados
-        authors = [
-            "tech_enthusiast", "code_master", "data_wizard", "web_guru",
-            "ai_researcher", "startup_founder", "marketing_pro", "design_ninja",
-            "mobile_dev", "game_creator", "crypto_expert", "finance_advisor",
-            "career_coach", "productivity_hacker", "future_thinker"
-        ]
-        
-        # Títulos e textos simulados para cada tópico
-        mock_data = {}
-        
-        for topic in topics:
-            posts = []
-            
-            # Gerar entre 30 e 50 posts para cada tópico
-            num_posts = random.randint(30, 50)
-            
-            for i in range(num_posts):
-                # Data aleatória nos últimos 90 dias
-                days_ago = random.randint(0, 90)
-                hours_ago = random.randint(0, 23)
-                minutes_ago = random.randint(0, 59)
-                created_date = datetime.now() - timedelta(days=days_ago, hours=hours_ago, minutes=minutes_ago)
-                created_utc = int(created_date.timestamp())
-                
-                # Escolher subreddit aleatório
-                subreddit = random.choice(subreddits)
-                
-                # Escolher autor aleatório
-                author = random.choice(authors)
-                
-                # Gerar título baseado no tópico
-                title_templates = [
-                    f"Dúvida sobre {topic}: como resolver este problema?",
-                    f"Preciso de ajuda com {topic} para um projeto",
-                    f"Alguém tem experiência com {topic}?",
-                    f"Melhor maneira de aprender {topic} em 2025?",
-                    f"Recursos recomendados para {topic}",
-                    f"Como {topic} mudou minha carreira/vida",
-                    f"Problemas comuns com {topic} e como resolvê-los",
-                    f"Novidades em {topic} que você precisa conhecer",
-                    f"Por que {topic} é importante para o futuro?",
-                    f"Comparando diferentes abordagens para {topic}"
-                ]
-                title = random.choice(title_templates)
-                
-                # Gerar texto baseado no título
-                selftext_templates = [
-                    f"Estou trabalhando com {topic} há algumas semanas e encontrei um problema que não consigo resolver. Alguém pode me ajudar?",
-                    f"Sou iniciante em {topic} e gostaria de saber por onde começar. Quais recursos vocês recomendam?",
-                    f"Tenho um projeto que envolve {topic} e preciso de conselhos sobre as melhores práticas.",
-                    f"Quais são as tendências atuais em {topic}? O que devo aprender para me manter atualizado?",
-                    f"Compartilhando minha experiência com {topic} após 6 meses de estudo e prática. Aqui estão as lições que aprendi...",
-                    f"Estou comparando diferentes ferramentas/frameworks para {topic}. Quais vocês recomendam e por quê?",
-                    f"Como {topic} está evoluindo em 2025? Quais são as previsões para o futuro desta tecnologia/área?",
-                    f"Quais habilidades complementares devo aprender junto com {topic} para aumentar minhas chances no mercado?",
-                    f"Estou enfrentando um desafio específico com {topic}: [descrição detalhada do problema]. Alguma sugestão?",
-                    f"Criei um projeto usando {topic} e gostaria de compartilhar com a comunidade. Feedback é bem-vindo!"
-                ]
-                selftext = random.choice(selftext_templates)
-                
-                # Adicionar mais conteúdo ao texto para torná-lo mais realista
-                additional_content = [
-                    f"\n\nJá tentei várias abordagens, incluindo [detalhes técnicos relacionados a {topic}], mas ainda estou tendo dificuldades.",
-                    f"\n\nMeu background: tenho experiência com [tecnologias relacionadas], mas {topic} é novo para mim.",
-                    f"\n\nO que já tentei: [lista de tentativas]. Nenhuma funcionou completamente.",
-                    f"\n\nObjetivo final: [descrição do projeto ou meta relacionada a {topic}].",
-                    f"\n\nAgradeceria muito qualquer ajuda ou direcionamento da comunidade!",
-                    f"\n\nEdit: Obrigado pelas respostas até agora! Estou tentando implementar as sugestões.",
-                    f"\n\nUpdate: Consegui resolver parte do problema usando [solução parcial].",
-                    f"\n\nPS: Se alguém tiver recursos adicionais sobre {topic}, por favor compartilhe."
-                ]
-                
-                # Adicionar conteúdo extra em 70% dos posts para variar o tamanho
-                if random.random() < 0.7:
-                    selftext += random.choice(additional_content)
-                
-                # Gerar estatísticas aleatórias
-                score = random.randint(-5, 500)  # Alguns posts podem ter score negativo
-                num_comments = random.randint(0, 50)
-                is_self = random.random() < 0.8  # 80% são self posts
-                
-                # Gerar ID aleatório
-                post_id = ''.join(random.choices('abcdefghijklmnopqrstuvwxyz0123456789', k=6))
-                
-                # Criar URL
-                full_link = f"https://www.reddit.com/r/{subreddit}/comments/{post_id}/{title.lower().replace(' ', '_')[:50]}/"
-                
-                # Criar post
-                post = {
-                    'id': post_id,
-                    'title': title,
-                    'selftext': selftext,
-                    'author': author,
-                    'subreddit': subreddit,
-                    'score': score,
-                    'num_comments': num_comments,
-                    'created_utc': created_utc,
-                    'full_link': full_link,
-                    'is_self': is_self
-                }
-                
-                posts.append(post)
-            
-            # Ordenar posts por data (mais recentes primeiro)
-            posts.sort(key=lambda x: x['created_utc'], reverse=True)
-            
-            mock_data[topic] = posts
-        
-        return mock_data
-    
-    def _load_mock_data(self):
-        """
-        Carrega dados simulados do arquivo.
-        
-        Returns:
-            dict: Dicionário com dados simulados.
-        """
-        mock_data_path = os.path.join(os.path.dirname(__file__), 'data', 'mock_reddit_data.json')
-        
-        with open(mock_data_path, 'r', encoding='utf-8') as f:
-            return json.load(f)
-    
-    def _search_mock_data(self, query, subreddit=None, limit=25):
-        """
-        Busca em dados simulados.
-        
-        Args:
-            query (str): Termo de busca.
-            subreddit (str, optional): Subreddit específico para buscar.
-            limit (int, optional): Número máximo de resultados.
-            
-        Returns:
-            list: Lista de posts encontrados.
-        """
-        mock_data = self._load_mock_data()
-        
-        # Verificar se o termo de busca existe diretamente
-        if query.lower() in mock_data:
-            results = mock_data[query.lower()]
-        else:
-            # Buscar em todos os tópicos
-            results = []
-            for topic, posts in mock_data.items():
-                # Verificar se o termo de busca está no tópico
-                if query.lower() in topic:
-                    results.extend(posts)
-                    continue
-                
-                # Buscar nos títulos e textos
-                for post in posts:
-                    if (query.lower() in post['title'].lower() or 
-                        query.lower() in post['selftext'].lower()):
-                        results.append(post)
-        
-        # Filtrar por subreddit se especificado
-        if subreddit:
-            results = [post for post in results if post['subreddit'].lower() == subreddit.lower()]
-        
-        # Ordenar por data (mais recentes primeiro)
-        results.sort(key=lambda x: x['created_utc'], reverse=True)
-        
-        # Limitar resultados
-        return results[:limit]
-    
-    def search_posts(self, query, subreddit=None, limit=25, sort='desc', sort_type='created_utc'):
-        """
-        Busca posts no Reddit.
-        
-        Args:
-            query (str): Termo de busca.
-            subreddit (str, optional): Subreddit específico para buscar. Default é None (busca em todos).
-            limit (int, optional): Número máximo de resultados. Default é 25.
-            sort (str, optional): Direção da ordenação ('asc' ou 'desc'). Default é 'desc'.
-            sort_type (str, optional): Campo para ordenação. Default é 'created_utc'.
-            
-        Returns:
-            list: Lista de posts encontrados.
+        Busca posts no Reddit usando PRAW.
+        Retorna lista vazia em caso de erro na busca.
         """
         self._respect_rate_limit()
-        print(f"RedditAPI search_posts - Query: '{query}', Subreddit: {subreddit or 'all'}, Mock data: {self.use_mock_data}")
+        print(f"RedditAPI search_posts - Query: '{query}', Subreddit: {subreddit or 'all'}")
         
-        if self.use_mock_data:
-            print("RedditAPI - Using mock data for search")
-            return self._search_mock_data(query, subreddit, limit)
-        else:
-            if not self.reddit:
-                print("RedditAPI - Error: PRAW client not initialized. Falling back to mock data.")
-                return self._search_mock_data(query, subreddit, limit)
+        if not self.reddit:
+            print("RedditAPI - Error: PRAW client not initialized.")
+            return [] # Retorna lista vazia se PRAW não foi inicializado
             
-            print(f"RedditAPI - Searching real Reddit posts for: '{query}' (Subreddit: {subreddit or 'all'}, Limit: {limit})")
-            try:
-                results = []
-                # Define search parameters
-                praw_search_params = {
-                    'query': query,
-                    'limit': limit,
-                    'sort': "new"
-                    # 'time_filter': "month"  # Temporarily commented out
+        print(f"RedditAPI - Searching real Reddit posts for: '{query}' (Subreddit: {subreddit or 'all'}, Limit: {limit})")
+        try:
+            results = []
+            praw_search_params = {
+                'query': query,
+                'limit': limit,
+                'sort': sort
+                # 'time_filter': "month" # Mantendo comentado por enquanto
+            }
+            print(f"RedditAPI - PRAW search params: {praw_search_params}")
+            
+            if subreddit:
+                print(f"RedditAPI - Searching in specific subreddit: r/{subreddit}")
+                target_subreddit = self.reddit.subreddit(subreddit)
+                search_results = target_subreddit.search(**praw_search_params)
+            else:
+                print("RedditAPI - Searching in r/all")
+                target_subreddit = self.reddit.subreddit("all")
+                search_results = target_subreddit.search(**praw_search_params)
+                
+            print("RedditAPI - PRAW search executed. Processing results...")
+            count = 0
+            for submission in search_results:
+                count += 1
+                post_data = {
+                    'id': submission.id,
+                    'title': submission.title,
+                    'selftext': submission.selftext,
+                    'author': submission.author.name if submission.author else "[deleted]",
+                    'subreddit': submission.subreddit.display_name,
+                    'score': submission.score,
+                    'num_comments': submission.num_comments,
+                    'created_utc': submission.created_utc,
+                    'full_link': submission.permalink,
+                    'is_self': submission.is_self
                 }
-                print(f"RedditAPI - PRAW search params: {praw_search_params}")
+                results.append(post_data)
+            
+            print(f"RedditAPI - Found {count} posts via PRAW before formatting.")
+            return results
+            
+        except Exception as e:
+            print(f"Erro durante a busca no Reddit com PRAW: {e}. Retornando lista vazia.")
+            return [] # Retorna lista vazia em caso de erro na busca
 
-                # Determinar o alvo da busca (subreddit específico ou todos)
-                if subreddit:
-                    print(f"RedditAPI - Searching in specific subreddit: r/{subreddit}")
-                    target_subreddit = self.reddit.subreddit(subreddit)
-                    search_results = target_subreddit.search(**praw_search_params)
-                else:
-                    print("RedditAPI - Searching in r/all")
-                    target_subreddit = self.reddit.subreddit("all")
-                    search_results = target_subreddit.search(**praw_search_params)
-
-                print("RedditAPI - PRAW search executed. Processing results...")
-                count = 0
-                # Coletar dados dos posts encontrados
-                for submission in search_results:
-                    count += 1
-                    post_data = {
-                        'id': submission.id,
-                        'title': submission.title,
-                        'selftext': submission.selftext,
-                        'author': submission.author.name if submission.author else "[deleted]",
-                        'subreddit': submission.subreddit.display_name,
-                        'score': submission.score,
-                        'num_comments': submission.num_comments,
-                        'created_utc': submission.created_utc,
-                        'full_link': submission.permalink,
-                        'is_self': submission.is_self
-                    }
-                    results.append(post_data)
-
-                print(f"RedditAPI - Found {count} posts via PRAW before formatting.")
-                return results
-
-            except Exception as e:
-                print(f"Erro durante a busca no Reddit com PRAW: {e}. Usando dados simulados como fallback.")
-                return self._search_mock_data(query, subreddit, limit)
-    
     def format_posts(self, posts):
         """
         Formata os posts para um DataFrame pandas.
@@ -421,18 +176,3 @@ class RedditAPI:
         """
         posts = self.search_posts(query, subreddit, limit)
         return self.format_posts(posts)
-
-
-# Exemplo de uso
-if __name__ == "__main__":
-    # Para teste local, você precisaria de um .env ou configurar secrets locais
-    # Como estamos focando na implantação do Streamlit Cloud, mantemos use_mock_data=True aqui
-    reddit_api = RedditAPI(use_mock_data=True)
-    if not reddit_api.use_mock_data:
-        print("\n--- Testando API Real (requer credenciais) ---")
-        real_posts = reddit_api.search_and_format("python best practices", limit=2)
-        print(real_posts)
-    else:
-        print("\n--- Testando API Simulada ---")
-        mock_posts = reddit_api.search_and_format("python", limit=3)
-        print(mock_posts)
