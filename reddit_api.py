@@ -42,17 +42,40 @@ class RedditAPI:
                 client_secret = reddit_secrets.get("client_secret")
                 user_agent = reddit_secrets.get("user_agent")
                 
+                # Opcionais para autenticação completa
+                username = reddit_secrets.get("username")
+                password = reddit_secrets.get("password")
+                
                 print(f"RedditAPI - Found secrets: client_id={'✓' if client_id else '✗'}, client_secret={'✓' if client_secret else '✗'}, user_agent={'✓' if user_agent else '✗'}")
                 
                 if client_id and client_secret and user_agent:
                     print("RedditAPI - Initializing PRAW with secrets")
-                    self.reddit = praw.Reddit(
-                        client_id=client_id,
-                        client_secret=client_secret,
-                        user_agent=user_agent,
-                        read_only=True  # Apenas leitura é suficiente
-                    )
-                    print("Cliente PRAW inicializado com sucesso usando Streamlit secrets.")
+                    
+                    # Configurar PRAW com as credenciais disponíveis
+                    praw_config = {
+                        'client_id': client_id,
+                        'client_secret': client_secret,
+                        'user_agent': user_agent,
+                    }
+                    
+                    # Adicionar credenciais de login se disponíveis
+                    if username and password and password != "TUA_PASSWORD_AQUI":
+                        print("RedditAPI - Username and password provided, using authenticated mode")
+                        praw_config['username'] = username
+                        praw_config['password'] = password
+                    else:
+                        print("RedditAPI - Using read-only mode")
+                        praw_config['read_only'] = True
+                    
+                    try:
+                        self.reddit = praw.Reddit(**praw_config)
+                        # Testar se a conexão está funcionando fazendo uma busca simples
+                        test_subreddit = self.reddit.subreddit("all")
+                        next(test_subreddit.new(limit=1), None)  # Testar buscando 1 post
+                        print("Cliente PRAW inicializado com sucesso e testado!")
+                    except Exception as e:
+                        print(f"RedditAPI - Erro ao testar conexão PRAW: {e}")
+                        raise  # Re-lançar exceção para ser capturada pelo try/except externo
                 else:
                     print("Erro: Credenciais do Reddit não encontradas nos segredos do Streamlit. Voltando para o modo simulado.")
                     self.use_mock_data = True
@@ -306,10 +329,20 @@ class RedditAPI:
                 # Determinar o alvo da busca (subreddit específico ou todos)
                 if subreddit:
                     target_subreddit = self.reddit.subreddit(subreddit)
-                    search_results = target_subreddit.search(query, limit=limit, sort="new")  # Ordenar por mais recentes
+                    search_results = target_subreddit.search(
+                        query, 
+                        limit=limit, 
+                        sort="new",
+                        time_filter="month"  # Limitar a posts do último mês para garantir resultados recentes
+                    )
                 else:
                     target_subreddit = self.reddit.subreddit("all")
-                    search_results = target_subreddit.search(query, limit=limit, sort="new")
+                    search_results = target_subreddit.search(
+                        query, 
+                        limit=limit, 
+                        sort="new",
+                        time_filter="month"  # Limitar a posts do último mês para garantir resultados recentes
+                    )
                 
                 # Coletar dados dos posts encontrados
                 for submission in search_results:
