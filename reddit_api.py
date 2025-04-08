@@ -326,47 +326,49 @@ class RedditAPI:
             print(f"RedditAPI - Searching real Reddit posts for: '{query}' (Subreddit: {subreddit or 'all'}, Limit: {limit})")
             try:
                 results = []
+                # Define search parameters
+                praw_search_params = {
+                    'query': query,
+                    'limit': limit,
+                    'sort': "new"
+                    # 'time_filter': "month"  # Temporarily commented out
+                }
+                print(f"RedditAPI - PRAW search params: {praw_search_params}")
+
                 # Determinar o alvo da busca (subreddit específico ou todos)
                 if subreddit:
+                    print(f"RedditAPI - Searching in specific subreddit: r/{subreddit}")
                     target_subreddit = self.reddit.subreddit(subreddit)
-                    search_results = target_subreddit.search(
-                        query, 
-                        limit=limit, 
-                        sort="new",
-                        time_filter="month"  # Limitar a posts do último mês para garantir resultados recentes
-                    )
+                    search_results = target_subreddit.search(**praw_search_params)
                 else:
+                    print("RedditAPI - Searching in r/all")
                     target_subreddit = self.reddit.subreddit("all")
-                    search_results = target_subreddit.search(
-                        query, 
-                        limit=limit, 
-                        sort="new",
-                        time_filter="month"  # Limitar a posts do último mês para garantir resultados recentes
-                    )
-                
+                    search_results = target_subreddit.search(**praw_search_params)
+
+                print("RedditAPI - PRAW search executed. Processing results...")
+                count = 0
                 # Coletar dados dos posts encontrados
                 for submission in search_results:
+                    count += 1
                     post_data = {
                         'id': submission.id,
                         'title': submission.title,
                         'selftext': submission.selftext,
-                        # Verificar se o autor existe (pode ser None para posts deletados)
                         'author': submission.author.name if submission.author else "[deleted]",
                         'subreddit': submission.subreddit.display_name,
                         'score': submission.score,
                         'num_comments': submission.num_comments,
                         'created_utc': submission.created_utc,
-                        'full_link': submission.permalink,  # Usar permalink para o link completo
+                        'full_link': submission.permalink,
                         'is_self': submission.is_self
                     }
                     results.append(post_data)
-                
-                print(f"Encontrados {len(results)} posts reais.")
+
+                print(f"RedditAPI - Found {count} posts via PRAW before formatting.")
                 return results
-                
+
             except Exception as e:
                 print(f"Erro durante a busca no Reddit com PRAW: {e}. Usando dados simulados como fallback.")
-                # Fallback para dados simulados em caso de erro na API
                 return self._search_mock_data(query, subreddit, limit)
     
     def format_posts(self, posts):
