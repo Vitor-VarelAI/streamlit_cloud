@@ -485,7 +485,7 @@ def main():
         # Botão para mostrar todos os resultados sem filtros
         if 'original_results' in st.session_state and st.button("Mostrar Todos os Resultados (Sem Filtros)"):
             st.session_state.current_results = st.session_state.original_results
-            st.experimental_rerun()
+            st.rerun()
     
     # Adicionar rodapé
     st.markdown('<div class="footer">GummyClone Lite - Desenvolvido para implantação no Streamlit Cloud</div>', unsafe_allow_html=True)
