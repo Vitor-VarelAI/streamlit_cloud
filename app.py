@@ -102,7 +102,18 @@ if 'current_summary' not in st.session_state:
 # Inicializar APIs
 @st.cache_resource
 def load_apis():
-    reddit_api = RedditAPI(use_mock_data=False)  # Using real Reddit API
+    # Verificar se os segredos do Reddit estão disponíveis
+    reddit_secrets = st.secrets.get("reddit", {})
+    use_reddit_mock = not (
+        reddit_secrets.get("client_id") and
+        reddit_secrets.get("client_secret") and
+        reddit_secrets.get("user_agent")
+    )
+    
+    if use_reddit_mock:
+        st.warning("Segredos do Reddit não encontrados. Usando dados simulados para Reddit API.")
+        
+    reddit_api = RedditAPI(use_mock_data=use_reddit_mock)
     openai_classifier = OpenAIClassifier()  # Already configured to use real API when key is available
     firecrawl_summarizer = FirecrawlSummarizer()  # Already configured to use real API when key is available
     return reddit_api, openai_classifier, firecrawl_summarizer
@@ -439,9 +450,9 @@ def main():
     with st.expander("🔧 Informações de Debug", expanded=False):
         # Mostrar status das APIs
         st.markdown("#### Status das APIs:")
-        st.markdown(f"- **Reddit API (Modo Simulado):** {'✅ Ativo' if hasattr(reddit_api, '_load_mock_data') else '❌ Inativo'}")
-        st.markdown(f"- **OpenAI Classifier:** {'✅ Ativo (Modo Simulado)' if openai_classifier.use_mock else '✅ Ativo (API Real)'}")
-        st.markdown(f"- **Firecrawl Summarizer:** {'✅ Ativo (Modo Simulado)' if firecrawl_summarizer.use_mock else '✅ Ativo (API Real)'}")
+        st.markdown(f"- **Reddit API:** {'🟠 Modo Simulado Ativo' if reddit_api.use_mock_data else '✅ API Real Ativa'}")
+        st.markdown(f"- **OpenAI Classifier:** {'🟠 Modo Simulado Ativo' if openai_classifier.use_mock else '✅ API Real Ativa'}")
+        st.markdown(f"- **Firecrawl Summarizer:** {'🟠 Modo Simulado Ativo' if firecrawl_summarizer.use_mock else '✅ API Real Ativa'}")
         
         # Mostrar exemplo de busca
         if st.button("🔍 Testar Busca com 'python'"):

@@ -7,6 +7,8 @@ import random
 import time
 import json
 import os
+import praw  # Importar PRAW
+import streamlit as st  # Importar Streamlit para acessar secrets
 
 class RedditAPI:
     """Classe para interagir com o Reddit ou fornecer dados simulados."""
@@ -20,13 +22,39 @@ class RedditAPI:
         """
         self.use_mock_data = use_mock_data
         self.last_request_time = 0
-        self.request_delay = 1  # Delay em segundos para evitar rate limiting
+        self.request_delay = 1  # Delay para API real
+        self.reddit = None  # Inicializar cliente PRAW como None
         
         # Criar diretório de dados se não existir
         os.makedirs(os.path.join(os.path.dirname(__file__), 'data'), exist_ok=True)
         
-        # Gerar dados simulados se não existirem
+        # Gerar dados simulados se não existirem (para modo mock)
         self._ensure_mock_data()
+        
+        # Configurar PRAW se não estiver usando dados simulados
+        if not self.use_mock_data:
+            try:
+                # Tentar obter segredos do Streamlit
+                reddit_secrets = st.secrets.get("reddit", {})
+                client_id = reddit_secrets.get("client_id")
+                client_secret = reddit_secrets.get("client_secret")
+                user_agent = reddit_secrets.get("user_agent")
+                
+                if client_id and client_secret and user_agent:
+                    self.reddit = praw.Reddit(
+                        client_id=client_id,
+                        client_secret=client_secret,
+                        user_agent=user_agent,
+                        read_only=True  # Apenas leitura é suficiente
+                    )
+                    # Testar a conexão (opcional, mas recomendado)
+                    print("Cliente PRAW inicializado com sucesso usando Streamlit secrets.")
+                else:
+                    print("Erro: Credenciais do Reddit não encontradas nos segredos do Streamlit. Voltando para o modo simulado.")
+                    self.use_mock_data = True
+            except Exception as e:
+                print(f"Erro ao inicializar PRAW com Streamlit secrets: {e}. Voltando para o modo simulado.")
+                self.use_mock_data = True
     
     def _respect_rate_limit(self):
         """Respeita o rate limit da API."""
@@ -258,12 +286,48 @@ class RedditAPI:
         self._respect_rate_limit()
         
         if self.use_mock_data:
+            print("Usando dados simulados do Reddit.")
             return self._search_mock_data(query, subreddit, limit)
         else:
-            # Aqui seria implementada a integração com PRAW
-            # Como estamos usando dados simulados, retornamos uma lista vazia
-            print("Integração com PRAW não implementada. Usando dados simulados.")
-            return self._search_mock_data(query, subreddit, limit)
+            if not self.reddit:
+                print("Erro: Cliente PRAW não inicializado. Usando dados simulados.")
+                return self._search_mock_data(query, subreddit, limit)
+            
+            print(f"Buscando posts reais no Reddit para: '{query}' (Subreddit: {subreddit or 'todos'}, Limite: {limit})")
+            try:
+                results = []
+                # Determinar o alvo da busca (subreddit específico ou todos)
+                if subreddit:
+                    target_subreddit = self.reddit.subreddit(subreddit)
+                    search_results = target_subreddit.search(query, limit=limit, sort="new")  # Ordenar por mais recentes
+                else:
+                    target_subreddit = self.reddit.subreddit("all")
+                    search_results = target_subreddit.search(query, limit=limit, sort="new")
+                
+                # Coletar dados dos posts encontrados
+                for submission in search_results:
+                    post_data = {
+                        'id': submission.id,
+                        'title': submission.title,
+                        'selftext': submission.selftext,
+                        # Verificar se o autor existe (pode ser None para posts deletados)
+                        'author': submission.author.name if submission.author else "[deleted]",
+                        'subreddit': submission.subreddit.display_name,
+                        'score': submission.score,
+                        'num_comments': submission.num_comments,
+                        'created_utc': submission.created_utc,
+                        'full_link': submission.permalink,  # Usar permalink para o link completo
+                        'is_self': submission.is_self
+                    }
+                    results.append(post_data)
+                
+                print(f"Encontrados {len(results)} posts reais.")
+                return results
+                
+            except Exception as e:
+                print(f"Erro durante a busca no Reddit com PRAW: {e}. Usando dados simulados como fallback.")
+                # Fallback para dados simulados em caso de erro na API
+                return self._search_mock_data(query, subreddit, limit)
     
     def format_posts(self, posts):
         """
@@ -293,7 +357,8 @@ class RedditAPI:
                 'score': post.get('score', 0),
                 'num_comments': post.get('num_comments', 0),
                 'created_date': created_date,
-                'url': post.get('full_link', ''),
+                # Usar o permalink diretamente, prefixado com reddit.com
+                'url': f"https://www.reddit.com{post.get('full_link', '')}" if not post.get('full_link', '').startswith('http') else post.get('full_link', ''),
                 'is_self': post.get('is_self', True)
             }
             formatted_posts.append(formatted_post)
@@ -318,6 +383,14 @@ class RedditAPI:
 
 # Exemplo de uso
 if __name__ == "__main__":
+    # Para teste local, você precisaria de um .env ou configurar secrets locais
+    # Como estamos focando na implantação do Streamlit Cloud, mantemos use_mock_data=True aqui
     reddit_api = RedditAPI(use_mock_data=True)
-    posts = reddit_api.search_and_format("python programming", limit=5)
-    print(posts)
+    if not reddit_api.use_mock_data:
+        print("\n--- Testando API Real (requer credenciais) ---")
+        real_posts = reddit_api.search_and_format("python best practices", limit=2)
+        print(real_posts)
+    else:
+        print("\n--- Testando API Simulada ---")
+        mock_posts = reddit_api.search_and_format("python", limit=3)
+        print(mock_posts)
