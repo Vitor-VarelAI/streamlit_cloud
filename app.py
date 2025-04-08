@@ -102,9 +102,9 @@ if 'current_summary' not in st.session_state:
 # Inicializar APIs
 @st.cache_resource
 def load_apis():
-    reddit_api = RedditAPI(use_mock_data=True)
-    openai_classifier = OpenAIClassifier()
-    firecrawl_summarizer = FirecrawlSummarizer()
+    reddit_api = RedditAPI(use_mock_data=False)  # Using real Reddit API
+    openai_classifier = OpenAIClassifier()  # Already configured to use real API when key is available
+    firecrawl_summarizer = FirecrawlSummarizer()  # Already configured to use real API when key is available
     return reddit_api, openai_classifier, firecrawl_summarizer
 
 reddit_api, openai_classifier, firecrawl_summarizer = load_apis()
