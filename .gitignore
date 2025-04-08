@@ -5,3 +5,9 @@ __pycache__/
 .env.*
 !.env.example
 
+# Streamlit secrets file (local)
+.streamlit/secrets.toml
+
+# Virtual environment
+.venv/
+
