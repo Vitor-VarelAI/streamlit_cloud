@@ -110,6 +110,17 @@ def load_apis():
         reddit_secrets.get("user_agent")
     )
     
+    # Debug info - safely show what secrets we found (redacting sensitive parts)
+    client_id = reddit_secrets.get("client_id", "")
+    client_secret = reddit_secrets.get("client_secret", "")
+    user_agent = reddit_secrets.get("user_agent", "")
+    
+    print(f"REDDIT SECRETS DEBUG:")
+    print(f"- client_id: {client_id[:4] + '****' if client_id else 'None'}")
+    print(f"- client_secret: {client_secret[:4] + '****' if client_secret else 'None'}")
+    print(f"- user_agent: {user_agent[:10] + '...' if len(user_agent) > 10 else user_agent}")
+    print(f"- Using mock data: {use_reddit_mock}")
+    
     if use_reddit_mock:
         st.warning("Segredos do Reddit não encontrados. Usando dados simulados para Reddit API.")
         
