@@ -13,7 +13,8 @@ class RedditAPI:
     
     def __init__(self):
         """
-        Inicializa a classe RedditAPI. Requer credenciais via Streamlit secrets.
+        Inicializa a classe RedditAPI. Tenta usar Streamlit secrets primeiro,
+        depois tenta variáveis de ambiente.
         Levanta exceção se a inicialização do PRAW falhar.
         """
         print("RedditAPI Init - Attempting PRAW initialization")
@@ -22,18 +23,29 @@ class RedditAPI:
         self.reddit = None
         
         try:
-            # Obter segredos do Streamlit
-            reddit_secrets = st.secrets.get("reddit", {})
-            client_id = reddit_secrets.get("client_id")
-            client_secret = reddit_secrets.get("client_secret")
-            user_agent = reddit_secrets.get("user_agent")
-            username = reddit_secrets.get("username") # Opcional
-            password = reddit_secrets.get("password") # Opcional
+            # Tentar obter credenciais do Streamlit secrets primeiro
+            try:
+                reddit_secrets = st.secrets.get("reddit", {})
+                client_id = reddit_secrets.get("client_id")
+                client_secret = reddit_secrets.get("client_secret")
+                user_agent = reddit_secrets.get("user_agent")
+                username = reddit_secrets.get("username")
+                password = reddit_secrets.get("password")
+                print("RedditAPI - Attempting to use Streamlit secrets")
+            except Exception as e:
+                print(f"RedditAPI - Streamlit secrets not available: {e}")
+                # Se falhar, tentar variáveis de ambiente
+                client_id = os.environ.get("REDDIT_CLIENT_ID")
+                client_secret = os.environ.get("REDDIT_CLIENT_SECRET")
+                user_agent = os.environ.get("REDDIT_USER_AGENT")
+                username = os.environ.get("REDDIT_USERNAME")
+                password = os.environ.get("REDDIT_PASSWORD")
+                print("RedditAPI - Using environment variables")
             
-            print(f"RedditAPI - Found secrets: client_id={'✓' if client_id else '✗'}, client_secret={'✓' if client_secret else '✗'}, user_agent={'✓' if user_agent else '✗'}")
+            print(f"RedditAPI - Found credentials: client_id={'✓' if client_id else '✗'}, client_secret={'✓' if client_secret else '✗'}, user_agent={'✓' if user_agent else '✗'}")
             
             if not (client_id and client_secret and user_agent):
-                raise ValueError("Erro: Credenciais essenciais do Reddit (client_id, client_secret, user_agent) não encontradas nos segredos do Streamlit.")
+                raise ValueError("Erro: Credenciais essenciais do Reddit (client_id, client_secret, user_agent) não encontradas.")
                 
             print("RedditAPI - Initializing PRAW...")
             praw_config = {
@@ -57,7 +69,7 @@ class RedditAPI:
             print("Cliente PRAW inicializado e testado com sucesso!")
             
         except Exception as e:
-            print(f"FATAL: Erro ao inicializar PRAW com Streamlit secrets: {e}")
+            print(f"FATAL: Erro ao inicializar PRAW: {e}")
             # Levantar a exceção para impedir a instanciação da classe se PRAW falhar
             raise ConnectionError(f"Falha ao conectar à API do Reddit: {e}") from e
             

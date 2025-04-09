@@ -2,31 +2,38 @@
 Módulo para integração com a API da OpenAI para classificação de posts.
 """
 import os
-import openai
-from dotenv import load_dotenv
-import pandas as pd
 import json
 import time
+import httpx
+from openai import OpenAI
+import pandas as pd
+import streamlit as st
+import logging
 
-# Carregar variáveis de ambiente
-load_dotenv()
+# Configure logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 class OpenAIClassifier:
     """Classe para classificar posts usando a API da OpenAI."""
     
     def __init__(self):
         """Inicializa a classe OpenAIClassifier."""
-        # Configurar a API da OpenAI
-        openai.api_key = os.getenv("OPENAI_API_KEY")
+        # Verificar se a OpenAI API está disponível
+        api_key = os.environ.get("OPENAI_API_KEY")
+        if not api_key:
+            try:
+                api_key = st.secrets.openai.api_key
+                logging.info("Found OpenAI API key in Streamlit secrets")
+            except (AttributeError, KeyError):
+                logging.warning("OpenAI API key not found in environment or secrets")
+                api_key = None
+        
+        self.use_mock = not api_key
+        if self.use_mock:
+            logging.warning("Using mock classification mode (no API key)")
+        
         self.last_request_time = 0
         self.request_delay = 1  # Delay em segundos para evitar rate limiting
-        
-        # Verificar se a chave da API está configurada
-        if not openai.api_key or openai.api_key == "sk-your-openai-key":
-            print("Aviso: Chave da API OpenAI não configurada. Usando modo simulado.")
-            self.use_mock = True
-        else:
-            self.use_mock = False
     
     def _respect_rate_limit(self):
         """Respeita o rate limit da API."""
@@ -171,6 +178,30 @@ class OpenAIClassifier:
             return self._mock_classify_post(post_title, post_text)
         
         try:
+            # Try to get API key
+            api_key = os.environ.get("OPENAI_API_KEY")
+            if not api_key:
+                try:
+                    api_key = st.secrets.openai.api_key
+                except (AttributeError, KeyError):
+                    logging.error("OpenAI API key not found in environment or secrets")
+                    return self._mock_classify_post(post_title, post_text)
+            
+            # Using a custom httpx client without proxies
+            http_client = httpx.Client(
+                base_url="https://api.openai.com",
+                follow_redirects=True,
+                timeout=60.0
+            )
+            
+            # Create a new client with our custom http_client
+            client = OpenAI(
+                api_key=api_key,
+                http_client=http_client
+            )
+            
+            logging.info("Created custom OpenAI client without proxies in classifier")
+            
             # Preparar o prompt para a API
             prompt = f"""
             Analise o seguinte post do Reddit e forneça uma classificação detalhada:
@@ -191,29 +222,22 @@ class OpenAIClassifier:
             """
             
             # Fazer a chamada para a API
-            response = openai.ChatCompletion.create(
+            response = client.chat.completions.create(
                 model="gpt-3.5-turbo",
                 messages=[
                     {"role": "system", "content": "Você é um assistente especializado em analisar posts do Reddit."},
                     {"role": "user", "content": prompt}
                 ],
                 temperature=0.3,
-                max_tokens=500
+                response_format={ "type": "json_object" }
             )
             
-            # Extrair e processar a resposta
-            result = response.choices[0].message.content.strip()
+            # Extrair e retornar a resposta
+            result = response.choices[0].message.content
+            return json.loads(result)
             
-            # Tentar converter a resposta para JSON
-            try:
-                classification = json.loads(result)
-                return classification
-            except json.JSONDecodeError:
-                print("Erro ao decodificar resposta da API. Usando classificação simulada.")
-                return self._mock_classify_post(post_title, post_text)
-                
         except Exception as e:
-            print(f"Erro ao classificar post: {e}")
+            logging.error(f"Erro ao classificar post: {e}")
             return self._mock_classify_post(post_title, post_text)
     
     def classify_posts_dataframe(self, df):

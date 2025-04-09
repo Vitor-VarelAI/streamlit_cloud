@@ -6,15 +6,14 @@ import pandas as pd
 import time
 import os
 import datetime
-from dotenv import load_dotenv
+import json
+from pathlib import Path
 
 # Importar módulos personalizados
 from reddit_api import RedditAPI
 from openai_classifier import OpenAIClassifier
 from firecrawl_summarizer import FirecrawlSummarizer
-
-# Carregar variáveis de ambiente
-load_dotenv()
+from psychographic_analyzer import analyze_psychographics
 
 # Configuração da página
 st.set_page_config(
@@ -160,7 +159,7 @@ def format_sentiment(sentiment):
         return sentiment
 
 def search_reddit(query, subreddit=None, limit=10, days_ago=None, only_text=False, post_type=None):
-    """Busca posts no Reddit e classifica."""
+    """Busca posts no Reddit, classifica e analisa psicograficamente."""
     with st.spinner(f'Buscando posts sobre "{query}" no Reddit...'):
         # Buscar posts
         df = reddit_api.search_and_format(query, subreddit=subreddit, limit=limit)
@@ -172,6 +171,19 @@ def search_reddit(query, subreddit=None, limit=10, days_ago=None, only_text=Fals
         # Classificar posts
         with st.spinner('Classificando posts com IA...'):
             df = openai_classifier.classify_posts_dataframe(df)
+        
+        # Analisar psicografia (NOVO)
+        with st.spinner('Analisando psicografia dos posts...'):
+            psychographic_insights = []
+            total_posts = len(df)
+            progress_bar = st.progress(0)
+            for i, row in df.iterrows():
+                post_content = f"Title: {row['title']}\n\n{row['selftext']}" # Combinar título e texto para melhor contexto
+                insight = analyze_psychographics(post_content)
+                psychographic_insights.append(insight) # Armazena o JSON string ou None
+                progress_bar.progress((i + 1) / total_posts)
+            df['psychographic_insight'] = psychographic_insights
+            progress_bar.empty() # Limpar barra de progresso
         
         # Criar uma cópia dos resultados originais antes de aplicar filtros
         original_count = len(df)
@@ -219,6 +231,7 @@ def search_reddit(query, subreddit=None, limit=10, days_ago=None, only_text=Fals
             st.warning("Nenhum resultado encontrado.")
             return None
             
+        st.success(f"Análise concluída! {len(filtered_df)} posts encontrados (de {original_count} originais).") # Mensagem de sucesso
         return filtered_df
 
 def analyze_url(url):
@@ -412,6 +425,29 @@ def main():
                     st.markdown(f"**Tópicos:** {row['tópicos']}")
                 
                 st.markdown(f"**Insights:** {row['insights']}")
+                
+                # Mostrar Análise Psicográfica (NOVO)
+                insight_json = row.get('psychographic_insight')
+                if insight_json:
+                    st.markdown("#### 🧠 Psychographic Insight")
+                    try:
+                        insight_data = json.loads(insight_json)
+                        # Melhorar exibição
+                        st.markdown(f"**Emotion:** {insight_data.get('emotion', 'N/A')}")
+                        st.markdown(f"**Core Belief:** {insight_data.get('core_belief', 'N/A')}")
+                        st.markdown(f"**Attempted Solution:** {insight_data.get('attempted_solution', 'N/A')}")
+                        st.markdown(f"**Perceived Blocker:** {insight_data.get('perceived_blocker', 'N/A')}")
+                        st.markdown(f"**External Forces:** {insight_data.get('external_forces', 'N/A')}")
+                        if insight_data.get('quote') and insight_data['quote'].lower() != 'none':
+                             st.markdown("**Quote:**")
+                             st.info(f"> {insight_data['quote']}") # Usar st.info para destacar citação
+                    except json.JSONDecodeError:
+                        st.error("Erro ao exibir insight psicográfico (formato inválido).")
+                    except Exception as e:
+                         st.error(f"Erro inesperado ao processar insight: {e}")
+                elif insight_json is None and row['selftext'] and len(row['selftext']) > 10: # Indicar se a análise falhou ou não foi aplicável
+                     st.markdown("---")
+                     st.warning("Análise psicográfica não disponível para este post.")
                 
                 st.markdown('</div>', unsafe_allow_html=True)
     
